@@ -1,74 +1,95 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
-import {ChatModule, InitProgressReport} from "@mlc-ai/web-llm";
+import {
+  AlipayOutlined,
+  ShoppingCartOutlined,
+  TaobaoOutlined,
+} from "@ant-design/icons";
+import { ChatModule } from "@mlc-ai/web-llm";
+import { Button, Divider, Input, Spin } from "antd";
+import { ReactNode, useEffect, useState } from "react";
 
-
-
-function setLabel(id: string, text: string) {
-  const label = document.getElementById(id);
-  if (label == null) {
-    throw Error("Cannot find label " + id);
-  }
-  label.innerText = text;
+interface ComponentItem {
+  name: string;
+  description: string;
 }
 
-async function main() {
+const componentList: ComponentItem[] = [
+  { name: "buy", description: "when user want to buy something" },
+  { name: "cart", description: "when user want to see shop cart" },
+  { name: "checkout", description: "when user want to checkout" },
+  { name: "no result", description: "when there is no result" },
+];
+
+const componentMap: { [key: string]: ReactNode } = {
+  buy: <TaobaoOutlined />,
+  cart: <ShoppingCartOutlined />,
+  checkout: <AlipayOutlined />,
+};
+async function getVicunaChat() {
   const chat = new ChatModule();
-
-  chat.setInitProgressCallback((report: InitProgressReport) => {
-    setLabel("init-label", report.text);
-  });
-
   await chat.reload("vicuna-v1-7b-q4f32_0");
-
-  const generateProgressCallback = (_step: number, message: string) => {
-    setLabel("generate-label", message);
-  };
-
-  const prompt0 = "What is the capital of Canada?";
-  setLabel("prompt-label", prompt0);
-  const reply0 = await chat.generate(prompt0, generateProgressCallback);
-  console.log(reply0);
-
-  const prompt1 = "Can you write a poem about it?";
-  setLabel("prompt-label", prompt1);
-  const reply1 = await chat.generate(prompt1, generateProgressCallback);
-  console.log(reply1);
-
-  console.log(await chat.runtimeStatsText());
+  const systemPrompt = `you are acting as a component advisor, when people as you questions, only return the most relevant component item in json format with name and description keys from the component list below \n ${JSON.stringify(
+    componentList
+  )}`;
+  await chat.generate(systemPrompt);
+  return chat;
 }
 
-main();
+const useVicunaChat = () => {
+  const [chat, setChat] = useState<ChatModule | null>(null);
+  useEffect(() => {
+    let innerChat: ChatModule | null = null;
+    getVicunaChat().then((chat) => {
+      innerChat = chat;
+      setChat(chat);
+    });
+    return () => {
+      innerChat?.unload();
+    };
+  }, []);
+  return chat;
+};
 
 function App() {
-  const [count, setCount] = useState(0)
-
+  const chat = useVicunaChat();
+  const [loading, setLoading] = useState(false);
+  const [component, setComponent] = useState<ComponentItem | null>(null);
+  const [text, setText] = useState("");
   return (
-    <>
-      <div>
-        <a href="https://vitejs.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <Spin spinning={!chat}>
+      <Input.TextArea
+        value={text}
+        onChange={(v) => setText(v.target.value)}
+      ></Input.TextArea>
+      <Divider></Divider>
+      <Button
+        type="primary"
+        block
+        loading={loading}
+        onClick={() => {
+          setLoading(true);
+          chat!
+            .generate(text, () => setLoading(false))
+            .then((res) => {
+              const regex = /```json\n([\s\S]*?)```/gm;
+              const match = regex.exec(res);
+              const json = match ? match[1] : null;
+              console.log(res, json);
+              try {
+                setComponent(JSON.parse(json as string));
+              } catch (e) {
+                console.log(e);
+              }
+            });
+        }}
+      >
+        Submit
+      </Button>
+      <Divider></Divider>
+      <div style={{ fontSize: "128px", textAlign: "center" }}>
+        {component && componentMap[component.name]}
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    </Spin>
+  );
 }
 
-export default App
+export default App;
